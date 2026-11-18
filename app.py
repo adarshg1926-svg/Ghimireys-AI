@@ -3,15 +3,11 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import (
-    SystemMessage,
-    HumanMessage,
-    AIMessage
-)
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 load_dotenv()
 
-# ---------------- PAGE CONFIG ----------------
+# ---------------- CONFIGURATION ----------------
 
 st.set_page_config(
     page_title="GhimireyGPT",
@@ -20,129 +16,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------------- API KEY ----------------
-
 try:
     API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
 except Exception:
     API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
-# ---------------- CUSTOM DESIGN ----------------
+MODEL = "openrouter/free"
 
-st.markdown("""
-<style>
-
-/* Main background */
-.stApp {
-    background-color: #212121;
-    color: #ECECEC;
-}
-
-/* Remove Streamlit branding */
-#MainMenu, footer, header {
-    visibility: hidden;
-}
-
-/* Hide default deploy button */
-.stDeployButton {
-    display: none;
-}
-
-/* Sidebar */
-section[data-testid="stSidebar"] {
-    background-color: #171717;
-    border-right: 1px solid #303030;
-}
-
-/* Sidebar text */
-section[data-testid="stSidebar"] * {
-    color: #ECECEC;
-}
-
-/* Main content */
-.block-container {
-    max-width: 900px;
-    padding-top: 2rem;
-    padding-bottom: 7rem;
-}
-
-/* Titles */
-h1, h2, h3 {
-    color: #ECECEC !important;
-    font-weight: 600 !important;
-}
-
-/* Chat messages */
-[data-testid="stChatMessage"] {
-    background: transparent;
-    border: none;
-    padding: 1rem 0;
-}
-
-/* Chat input container */
-[data-testid="stChatInput"] {
-    border-radius: 25px !important;
-    background-color: #303030 !important;
-    border: 1px solid #454545 !important;
-}
-
-/* Input field */
-[data-testid="stChatInput"] textarea {
-    color: #FFFFFF !important;
-}
-
-/* Buttons */
-.stButton button {
-    background-color: #303030;
-    color: #ECECEC;
-    border: 1px solid #454545;
-    border-radius: 12px;
-    width: 100%;
-    text-align: left;
-    padding: 10px 14px;
-}
-
-.stButton button:hover {
-    background-color: #404040;
-    border-color: #666666;
-}
-
-/* Welcome heading */
-.welcome-title {
-    font-size: 2.3rem;
-    font-weight: 600;
-    text-align: center;
-    color: #ECECEC;
-    margin-top: 18vh;
-    margin-bottom: 2rem;
-}
-
-/* Watermark */
-.watermark {
-    color: #777777;
-    font-size: 11px;
-    text-align: center;
-    padding-top: 12px;
-}
-
-/* Remove top padding on mobile */
-@media (max-width: 768px) {
-    .block-container {
-        padding-top: 1rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-
-    .welcome-title {
-        font-size: 1.8rem;
-        margin-top: 14vh;
-    }
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ---------------- SESSION STATE ----------------
+# ---------------- SESSION DATA ----------------
 
 if "chats" not in st.session_state:
     st.session_state.chats = {"New chat": []}
@@ -153,123 +34,320 @@ if "current_chat" not in st.session_state:
 if "chat_counter" not in st.session_state:
     st.session_state.chat_counter = 0
 
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
+
+
+# ---------------- DESIGN ----------------
+
+st.markdown("""
+<style>
+
+/* Global */
+.stApp {
+    background: #212121;
+    color: #ececec;
+}
+
+header, footer, #MainMenu, .stDeployButton {
+    visibility: hidden;
+}
+
+.block-container {
+    max-width: 850px;
+    padding-top: 2rem;
+    padding-bottom: 8rem;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #171717;
+    border-right: 1px solid #303030;
+}
+
+section[data-testid="stSidebar"] .block-container {
+    padding: 1.3rem 1rem;
+}
+
+section[data-testid="stSidebar"] p,
+section[data-testid="stSidebar"] span {
+    color: #eeeeee;
+}
+
+/* Sidebar buttons */
+section[data-testid="stSidebar"] .stButton button {
+    background: transparent;
+    border: none;
+    color: #eeeeee;
+    border-radius: 9px;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 14px;
+}
+
+section[data-testid="stSidebar"] .stButton button:hover {
+    background: #292929;
+}
+
+/* Hide chat avatars completely */
+[data-testid="stChatMessageAvatar"] {
+    display: none !important;
+}
+
+/* Remove default chat cards */
+[data-testid="stChatMessage"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 16px 0 !important;
+    gap: 0 !important;
+}
+
+/* Chat content */
+[data-testid="stChatMessageContent"] {
+    color: #ececec !important;
+    line-height: 1.75;
+    font-size: 16px;
+}
+
+/* User message */
+[data-testid="stChatMessage"]:has(
+    [data-testid="stChatMessageContent"]
+) {
+    border-radius: 12px;
+}
+
+/* Chat input */
+[data-testid="stChatInput"] {
+    background: #303030 !important;
+    border: 1px solid #454545 !important;
+    border-radius: 25px !important;
+    padding: 5px 10px !important;
+    box-shadow: none !important;
+}
+
+[data-testid="stChatInput"] textarea {
+    color: #ffffff !important;
+    font-size: 15px !important;
+}
+
+[data-testid="stChatInput"] textarea::placeholder {
+    color: #999999 !important;
+}
+
+/* Send button */
+[data-testid="stChatInput"] button {
+    background: #eeeeee !important;
+    color: #171717 !important;
+    border-radius: 50% !important;
+}
+
+/* Welcome */
+.welcome {
+    text-align: center;
+    margin-top: 25vh;
+}
+
+.welcome h1 {
+    font-size: 32px;
+    font-weight: 600;
+    color: #eeeeee;
+    letter-spacing: -1px;
+}
+
+.welcome p {
+    color: #999999;
+    font-size: 14px;
+}
+
+/* Small heading */
+.brand {
+    font-size: 19px;
+    font-weight: 650;
+    letter-spacing: -0.5px;
+    color: #eeeeee;
+    padding: 5px 0 18px 5px;
+}
+
+/* Sidebar label */
+.history-label {
+    font-size: 12px;
+    color: #888888;
+    padding: 20px 8px 8px;
+}
+
+/* Footer */
+.note {
+    text-align: center;
+    color: #777777;
+    font-size: 11px;
+    padding-top: 10px;
+}
+
+/* Mobile */
+@media(max-width: 768px) {
+    .block-container {
+        padding: 1rem 1rem 7rem;
+    }
+
+    .welcome {
+        margin-top: 22vh;
+    }
+
+    .welcome h1 {
+        font-size: 25px;
+    }
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
 # ---------------- SIDEBAR ----------------
 
 with st.sidebar:
 
-    st.markdown("## GhimireyGPT")
+    st.markdown(
+        '<div class="brand">GhimireyGPT</div>',
+        unsafe_allow_html=True
+    )
 
-    if st.button("+  New chat", key="new_chat", use_container_width=True):
+    if st.button("+  New chat", use_container_width=True):
         st.session_state.chat_counter += 1
         name = f"New chat {st.session_state.chat_counter}"
         st.session_state.chats[name] = []
         st.session_state.current_chat = name
         st.rerun()
 
-    st.markdown("---")
-    st.caption("Your chats")
+    st.markdown(
+        '<div class="history-label">Your chats</div>',
+        unsafe_allow_html=True
+    )
 
-    for chat_name in reversed(list(st.session_state.chats.keys())):
+    for name in reversed(list(st.session_state.chats.keys())):
         if st.button(
-            chat_name,
-            key=f"chat_{chat_name}",
+            name,
+            key="history_" + name,
             use_container_width=True
         ):
-            st.session_state.current_chat = chat_name
+            st.session_state.current_chat = name
             st.rerun()
 
-    st.markdown("---")
-    st.caption("GhimireyGPT")
 
-# ---------------- CURRENT CHAT ----------------
+# ---------------- CHAT DATA ----------------
 
 messages = st.session_state.chats[
     st.session_state.current_chat
 ]
 
+
 # ---------------- WELCOME SCREEN ----------------
 
 if not messages:
-    st.markdown(
-        '<div class="welcome-title">What can I help with?</div>',
-        unsafe_allow_html=True
-    )
 
-# ---------------- DISPLAY CHAT ----------------
+    st.markdown("""
+    <div class="welcome">
+        <h1>What's on your mind?</h1>
+        <p>Ask anything. Let's figure it out together.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-for message in messages:
 
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# ---------------- SHOW MESSAGES ----------------
+
+for msg in messages:
+
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
 
 # ---------------- MESSAGE INPUT ----------------
 
 prompt = st.chat_input("How's your day going?")
 
 if prompt:
+    st.session_state.pending_prompt = prompt
+
+# Process a new message
+if st.session_state.pending_prompt:
+
+    prompt = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+
+    messages = st.session_state.chats[
+        st.session_state.current_chat
+    ]
 
     messages.append({
         "role": "user",
         "content": prompt
     })
 
-    # Give the first chat a meaningful title
+    # Automatically name the conversation
     if len(messages) == 1:
-        title = prompt[:30]
         old_name = st.session_state.current_chat
+        new_name = prompt[:30].strip()
 
-        if old_name == "New chat":
-            new_name = title
-            st.session_state.chats[new_name] = messages
-            del st.session_state.chats[old_name]
-            st.session_state.current_chat = new_name
+        if not new_name:
+            new_name = "New conversation"
 
+        if new_name in st.session_state.chats:
+            st.session_state.chat_counter += 1
+            new_name = f"{new_name} ({st.session_state.chat_counter})"
+
+        st.session_state.chats[new_name] = messages
+        del st.session_state.chats[old_name]
+        st.session_state.current_chat = new_name
+
+    # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Generate response
     with st.chat_message("assistant"):
 
         if not API_KEY:
-            st.error("API key is missing. Please check your Streamlit Secrets.")
+            st.error("API key missing. Check your Streamlit Secrets.")
 
         else:
             try:
                 llm = ChatOpenAI(
-                    model="openrouter/free",
-                    openai_api_key=API_KEY,
-                    openai_api_base="https://openrouter.ai/api/v1",
-                    temperature=0.7,
-                    default_headers={
-                        "HTTP-Referer": "https://ghimireygpt.streamlit.app",
-                        "X-Title": "GhimireyGPT"
-                    }
+                    model=MODEL,
+                    api_key=API_KEY,
+                    base_url="https://openrouter.ai/api/v1",
+                    temperature=0.7
                 )
 
-                chat_messages = [
+                conversation = [
                     SystemMessage(
-                        content="You are a helpful, intelligent, friendly AI assistant. "
-                                "Give clear, natural and useful answers."
+                        content=(
+                            "You are a helpful, intelligent and natural AI assistant. "
+                            "Talk like a thoughtful human conversational partner. "
+                            "Avoid robotic language, unnecessary headings and generic "
+                            "introductions. Be clear, direct and conversational."
+                        )
                     )
                 ]
 
                 for msg in messages:
                     if msg["role"] == "user":
-                        chat_messages.append(
+                        conversation.append(
                             HumanMessage(content=msg["content"])
                         )
                     else:
-                        chat_messages.append(
+                        conversation.append(
                             AIMessage(content=msg["content"])
                         )
 
-                response = llm.invoke(chat_messages)
+                with st.spinner(""):
+                    response = llm.invoke(conversation)
 
                 answer = response.content
 
                 if isinstance(answer, list):
                     answer = "\n".join(
                         str(item.get("text", item))
-                        if isinstance(item, dict) else str(item)
+                        if isinstance(item, dict)
+                        else str(item)
                         for item in answer
                     )
 
@@ -285,9 +363,10 @@ if prompt:
 
     st.rerun()
 
-# ---------------- FOOTER ----------------
+
+# ---------------- BOTTOM WATERMARK ----------------
 
 st.markdown(
-    '<div class="watermark">GhimireyGPT · How\'s your day going?</div>',
+    '<div class="note">GhimireyGPT can make mistakes. Check important information.</div>',
     unsafe_allow_html=True
 )
