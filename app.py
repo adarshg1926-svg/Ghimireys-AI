@@ -10,9 +10,9 @@ from langchain_core.messages import (
     AIMessage
 )
 
-# ==========================================
+# =========================================
 # 1. CONFIGURATION
-# ==========================================
+# =========================================
 
 load_dotenv()
 
@@ -31,9 +31,9 @@ except Exception:
 MODEL = "openrouter/free"
 
 
-# ==========================================
+# =========================================
 # 2. SESSION STATE
-# ==========================================
+# =========================================
 
 if "chats" not in st.session_state:
     st.session_state.chats = {
@@ -46,48 +46,46 @@ if "current_chat" not in st.session_state:
 if "chat_counter" not in st.session_state:
     st.session_state.chat_counter = 0
 
+if "suggested_prompt" not in st.session_state:
+    st.session_state.suggested_prompt = None
 
-# ==========================================
-# 3. CUSTOM CSS
-# ==========================================
+
+# =========================================
+# 3. CUSTOM DESIGN
+# =========================================
 
 st.markdown("""
 <style>
 
-/* GLOBAL */
+/* Main background */
 
 .stApp {
     background: #212121;
     color: #ECECEC;
 }
 
-header, footer, #MainMenu,
-.stDeployButton {
-    display: none !important;
+header[data-testid="stHeader"] {
+    background: #212121;
 }
 
 [data-testid="stToolbar"],
-[data-testid="stStatusWidget"] {
+[data-testid="stDeployButton"],
+[data-testid="stDecoration"],
+#MainMenu,
+footer {
     display: none !important;
 }
 
 .block-container {
     max-width: 850px;
-    padding-top: 1rem;
-    padding-bottom: 7rem;
+    padding: 1rem 1.25rem 7rem;
 }
 
-/* REMOVE UNNECESSARY ELEMENTS */
-
-[data-testid="stDecoration"] {
-    display: none !important;
-}
-
-/* SIDEBAR */
+/* Sidebar */
 
 section[data-testid="stSidebar"] {
     background: #171717;
-    border-right: 1px solid #333333;
+    border-right: 1px solid #333;
 }
 
 section[data-testid="stSidebar"] .block-container {
@@ -95,101 +93,107 @@ section[data-testid="stSidebar"] .block-container {
 }
 
 section[data-testid="stSidebar"] .stButton button {
-    background: transparent !important;
-    color: #EAEAEA !important;
-    border: none !important;
-    border-radius: 9px !important;
-    text-align: left !important;
-    padding: 10px 12px !important;
-    font-size: 14px !important;
+    background: transparent;
+    color: #EAEAEA;
+    border: none;
+    border-radius: 9px;
+    text-align: left;
+    padding: 10px 12px;
 }
 
 section[data-testid="stSidebar"] .stButton button:hover {
-    background: #303030 !important;
+    background: #303030;
 }
 
-/* BRAND */
+/* Branding */
 
 .brand {
-    font-size: 20px;
+    font-size: 21px;
     font-weight: 650;
     letter-spacing: -0.7px;
-    color: #F0F0F0;
     padding: 5px 5px 22px;
+    color: #F0F0F0;
 }
 
 .history-label {
-    color: #888888;
+    color: #888;
     font-size: 12px;
-    padding: 22px 8px 9px;
+    padding: 22px 8px 10px;
 }
 
-/* TOP BAR */
+/* Top bar */
 
 .topbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 3px 0 12px;
-    border-bottom: 1px solid #333333;
+    min-height: 48px;
+    border-bottom: 1px solid #383838;
     margin-bottom: 12px;
 }
 
 .topbar-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #ECECEC;
+    font-size: 17px;
+    font-weight: 650;
+    color: #F0F0F0;
 }
 
-/* WELCOME */
+/* Welcome screen */
 
 .welcome {
-    min-height: 55vh;
+    width: 100%;
+    max-width: 650px;
+    min-height: 48vh;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
+    padding: 25px 12px;
 }
 
 .welcome h1 {
-    font-size: 30px;
+    font-size: clamp(23px, 5vw, 31px);
+    line-height: 1.25;
     font-weight: 600;
     letter-spacing: -1px;
     color: #ECECEC;
-    margin-bottom: 9px;
+    margin: 0 0 12px;
 }
 
 .welcome p {
+    color: #A0A0A0;
     font-size: 14px;
-    color: #999999;
+    line-height: 1.6;
+    margin: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
-/* SUGGESTIONS */
+/* Suggestions */
 
-.suggestions {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 9px;
-    margin-top: 25px;
-}
-
-.suggestion {
-    border: 1px solid #454545;
-    color: #D0D0D0;
-    border-radius: 20px;
-    padding: 9px 13px;
-    font-size: 12px;
+div.st-key-suggestion1 button,
+div.st-key-suggestion2 button {
     background: transparent;
+    color: #D0D0D0;
+    border: 1px solid #454545;
+    border-radius: 18px;
+    min-height: 43px;
+    font-size: 12px;
 }
 
-/* USER MESSAGE */
+div.st-key-suggestion1 button:hover,
+div.st-key-suggestion2 button:hover {
+    background: #303030;
+    border-color: #666;
+}
+
+/* User messages */
 
 .user-row {
+    width: 100%;
     display: flex;
     justify-content: flex-end;
-    width: 100%;
     margin: 24px 0;
 }
 
@@ -198,19 +202,20 @@ section[data-testid="stSidebar"] .stButton button:hover {
     background: #303030;
     color: #ECECEC;
     border-radius: 20px;
-    padding: 12px 17px;
+    padding: 11px 17px;
     font-size: 15px;
     line-height: 1.65;
     overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
-/* ASSISTANT MESSAGE */
+/* Assistant messages */
 
 .assistant-content {
+    width: 100%;
     color: #ECECEC;
     font-size: 15.5px;
     line-height: 1.8;
-    padding: 5px 0;
     overflow-wrap: anywhere;
 }
 
@@ -243,27 +248,26 @@ section[data-testid="stSidebar"] .stButton button:hover {
     padding: 0;
 }
 
-/* CHAT INPUT */
+/* Chat input */
 
 [data-testid="stChatInput"] {
     background: #303030 !important;
     border: 1px solid #454545 !important;
     border-radius: 26px !important;
     box-shadow: none !important;
-    padding: 8px 12px !important;
 }
 
 [data-testid="stChatInput"]:focus-within {
-    border-color: #777777 !important;
+    border-color: #777 !important;
 }
 
 [data-testid="stChatInput"] textarea {
-    color: #FFFFFF !important;
+    color: white !important;
     font-size: 15px !important;
 }
 
 [data-testid="stChatInput"] textarea::placeholder {
-    color: #999999 !important;
+    color: #999 !important;
 }
 
 [data-testid="stChatInput"] button {
@@ -272,43 +276,43 @@ section[data-testid="stSidebar"] .stButton button:hover {
     border-radius: 50% !important;
 }
 
-/* THINKING */
-
-.stSpinner > div {
-    border-top-color: #FFFFFF !important;
-}
-
-/* FOOTER */
+/* Footer */
 
 .disclaimer {
     color: #858585;
-    font-size: 11px;
     text-align: center;
-    padding: 12px 0;
+    font-size: 10px;
+    padding: 10px 0;
 }
 
-/* MOBILE */
+/* Mobile */
 
-@media(max-width: 768px) {
+@media (max-width: 768px) {
 
     .block-container {
         padding: 0.7rem 1rem 6rem;
     }
 
     .welcome {
-        min-height: 55vh;
+        min-height: 43vh;
+        padding: 20px 5px;
     }
 
     .welcome h1 {
         font-size: 25px;
     }
 
-    .assistant-content {
-        font-size: 15px;
+    .welcome p {
+        font-size: 13px;
     }
 
     .user-bubble {
+        max-width: 90%;
         font-size: 14px;
+    }
+
+    .assistant-content {
+        font-size: 15px;
     }
 
 }
@@ -317,9 +321,9 @@ section[data-testid="stSidebar"] .stButton button:hover {
 """, unsafe_allow_html=True)
 
 
-# ==========================================
+# =========================================
 # 4. SIDEBAR
-# ==========================================
+# =========================================
 
 with st.sidebar:
 
@@ -335,7 +339,6 @@ with st.sidebar:
         name = f"New chat {st.session_state.chat_counter}"
 
         st.session_state.chats[name] = []
-
         st.session_state.current_chat = name
 
         st.rerun()
@@ -352,65 +355,71 @@ with st.sidebar:
             key="history_" + name,
             use_container_width=True
         ):
-
             st.session_state.current_chat = name
             st.rerun()
 
 
-# ==========================================
-# 5. MAIN HEADER
-# ==========================================
+# =========================================
+# 5. HEADER
+# =========================================
 
-st.markdown("""
+st.html("""
 <div class="topbar">
     <div class="topbar-title">GhimireyGPT</div>
 </div>
-""", unsafe_allow_html=True)
+""")
 
 
-# ==========================================
-# 6. CURRENT CHAT
-# ==========================================
+# =========================================
+# 6. GET CURRENT CONVERSATION
+# =========================================
 
-messages = st.session_state.chats[
-    st.session_state.current_chat
-]
+current_name = st.session_state.current_chat
+
+messages = st.session_state.chats[current_name]
 
 
-# ==========================================
+# =========================================
 # 7. WELCOME SCREEN
-# ==========================================
+# =========================================
 
 if not messages:
 
-    st.markdown("""
+    st.html("""
     <div class="welcome">
-
         <h1>What can I help with?</h1>
-
         <p>Ask anything. Let's figure it out together.</p>
-
     </div>
-    """, unsafe_allow_html=True)
-
-    # Suggested prompts
+    """)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Explain something interesting", use_container_width=True):
-            st.session_state.suggested_prompt = "Explain something interesting to me."
+        if st.button(
+            "Explain something interesting",
+            key="suggestion1",
+            use_container_width=True
+        ):
+            st.session_state.suggested_prompt = (
+                "Explain something interesting to me."
+            )
             st.rerun()
 
     with col2:
-        if st.button("Help me write something", use_container_width=True):
-            st.session_state.suggested_prompt = "Help me write something."
+        if st.button(
+            "Help me write something",
+            key="suggestion2",
+            use_container_width=True
+        ):
+            st.session_state.suggested_prompt = (
+                "Help me write something."
+            )
             st.rerun()
 
 
-# ==========================================
-# 8. DISPLAY MESSAGES
-# ==========================================
+# =========================================
+# 8. DISPLAY CONVERSATION
+# =========================================
 
 for message in messages:
 
@@ -420,13 +429,12 @@ for message in messages:
             message["content"]
         ).replace("\n", "<br>")
 
-        st.markdown(
+        st.html(
             f"""
             <div class="user-row">
                 <div class="user-bubble">{safe_text}</div>
             </div>
-            """,
-            unsafe_allow_html=True
+            """
         )
 
     else:
@@ -444,13 +452,15 @@ for message in messages:
         )
 
 
-# ==========================================
+# =========================================
 # 9. MESSAGE INPUT
-# ==========================================
+# =========================================
 
-if "suggested_prompt" in st.session_state:
+if st.session_state.suggested_prompt:
 
-    prompt = st.session_state.pop("suggested_prompt")
+    prompt = st.session_state.suggested_prompt
+
+    st.session_state.suggested_prompt = None
 
 else:
 
@@ -459,9 +469,9 @@ else:
     )
 
 
-# ==========================================
-# 10. PROCESS MESSAGE
-# ==========================================
+# =========================================
+# 10. SEND TO AI
+# =========================================
 
 if prompt:
 
@@ -497,12 +507,12 @@ if prompt:
 
         st.session_state.current_chat = new_name
 
-    # API KEY CHECK
+    # API KEY
 
     if not API_KEY:
 
         st.error(
-            "API key missing. Check your Streamlit Secrets."
+            "API key missing. Check Streamlit Secrets."
         )
 
     else:
@@ -520,11 +530,13 @@ if prompt:
             conversation = [
                 SystemMessage(
                     content=(
-                        "You are a highly intelligent, natural and "
-                        "friendly AI assistant. Respond conversationally. "
-                        "Be direct, useful and thoughtful. Avoid robotic "
-                        "introductions, unnecessary filler and excessive "
-                        "headings. Adapt to the user's tone."
+                        "You are GhimireyGPT, a capable and natural "
+                        "conversational AI assistant. Be helpful, "
+                        "thoughtful, clear and direct. Adapt to the "
+                        "user's tone. Avoid robotic introductions, "
+                        "unnecessary filler and excessive headings. "
+                        "Give honest answers, including disagreement "
+                        "when appropriate."
                     )
                 )
             ]
@@ -563,22 +575,25 @@ if prompt:
                 "content": str(answer)
             })
 
-        except Exception as error:
+        except Exception:
 
-            st.error(
-                f"Something went wrong: {error}"
-            )
+            messages.append({
+                "role": "assistant",
+                "content": (
+                    "I couldn't complete that request. "
+                    "Please try again in a moment."
+                )
+            })
 
     st.rerun()
 
 
-# ==========================================
-# 11. FOOTER
-# ==========================================
+# =========================================
+# 11. DISCLAIMER
+# =========================================
 
-st.markdown(
-    '<div class="disclaimer">'
-    'GhimireyGPT can make mistakes. Check important information.'
-    '</div>',
-    unsafe_allow_html=True
-)
+st.html("""
+<div class="disclaimer">
+    GhimireyGPT can make mistakes. Check important information.
+</div>
+""")
