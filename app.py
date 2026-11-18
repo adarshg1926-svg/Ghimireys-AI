@@ -708,7 +708,6 @@ for i, msg in enumerate(messages):
 submitted = st.chat_input(
     "Message GhimireyGPT",
     accept_file="multiple",
-    file_type=FILE_TYPES,
 )
 
 prompt = None
@@ -718,9 +717,15 @@ if st.session_state.suggested_prompt:
     prompt = st.session_state.suggested_prompt
 elif submitted:
     prompt = (submitted.text or "").strip()
-    uploads = list(submitted.files or [])
-    if not prompt and uploads:
-        prompt = ""
+    uploads = []
+    for f in (submitted.files or []):
+        ext = f.name.rsplit(".", 1)[-1].lower() if "." in f.name else ""
+        if ext in FILE_TYPES:
+            uploads.append(f)
+        else:
+            st.warning(f"Skipped {f.name}: unsupported file type.")
+    if not prompt and submitted.files and not uploads:
+        prompt = None
 
 st.session_state.suggested_prompt = None
 
