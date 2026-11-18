@@ -53,10 +53,10 @@ st.caption("A simple Streamlit chatbot powered by LangChain + OpenRouter.")
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    try:
-    api_key = st.secrets["OPENROUTER_API_KEY"]
-except Exception:
-    api_key = os.getenv("OPENROUTER_API_KEY", "")
+        try:
+        api_key = st.secrets["OPENROUTER_API_KEY"]
+    except Exception:
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
 
     model_name = st.text_input(
         "Model ID",
