@@ -1,508 +1,298 @@
 
 import os
-import requests
-from flask import Flask, request, jsonify, render_template_string
+import html
+import streamlit as st
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
+    AIMessage
+)
+
+# ==========================================
+# 1. CONFIGURATION
+# ==========================================
 
 load_dotenv()
 
-app = Flask(__name__)
+st.set_page_config(
+    page_title="GhimireyGPT",
+    page_icon="G",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+try:
+    API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
+except Exception:
+    API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
 MODEL = "openrouter/free"
 
+
 # ==========================================
-# FRONTEND
+# 2. SESSION STATE
 # ==========================================
 
-PAGE = r"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#212121">
-<title>GhimireyGPT</title>
+if "chats" not in st.session_state:
+    st.session_state.chats = {
+        "New chat": []
+    }
 
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = "New chat"
 
+if "chat_counter" not in st.session_state:
+    st.session_state.chat_counter = 0
+
+
+# ==========================================
+# 3. CUSTOM CSS
+# ==========================================
+
+st.markdown("""
 <style>
-:root {
-    --bg: #212121;
-    --sidebar: #171717;
-    --panel: #303030;
-    --border: #393939;
-    --text: #ececec;
-    --muted: #999999;
+
+/* GLOBAL */
+
+.stApp {
+    background: #212121;
+    color: #ECECEC;
 }
 
-* {
-    box-sizing: border-box;
+header, footer, #MainMenu,
+.stDeployButton {
+    display: none !important;
 }
 
-body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                 Roboto, Helvetica, Arial, sans-serif;
-    height: 100dvh;
-    overflow: hidden;
+[data-testid="stToolbar"],
+[data-testid="stStatusWidget"] {
+    display: none !important;
 }
 
-/* APP LAYOUT */
+.block-container {
+    max-width: 850px;
+    padding-top: 1rem;
+    padding-bottom: 7rem;
+}
 
-.app {
-    display: flex;
-    width: 100%;
-    height: 100dvh;
+/* REMOVE UNNECESSARY ELEMENTS */
+
+[data-testid="stDecoration"] {
+    display: none !important;
 }
 
 /* SIDEBAR */
 
-.sidebar {
-    width: 260px;
-    min-width: 260px;
-    height: 100%;
-    background: var(--sidebar);
-    display: flex;
-    flex-direction: column;
-    padding: 15px 12px;
-    transition: margin-left .25s ease;
-    z-index: 10;
+section[data-testid="stSidebar"] {
+    background: #171717;
+    border-right: 1px solid #333333;
 }
 
-.sidebar.hidden {
-    margin-left: -260px;
+section[data-testid="stSidebar"] .block-container {
+    padding: 1.2rem 1rem;
 }
 
-.sidebar-top {
+section[data-testid="stSidebar"] .stButton button {
+    background: transparent !important;
+    color: #EAEAEA !important;
+    border: none !important;
+    border-radius: 9px !important;
+    text-align: left !important;
+    padding: 10px 12px !important;
+    font-size: 14px !important;
+}
+
+section[data-testid="stSidebar"] .stButton button:hover {
+    background: #303030 !important;
+}
+
+/* BRAND */
+
+.brand {
+    font-size: 20px;
+    font-weight: 650;
+    letter-spacing: -0.7px;
+    color: #F0F0F0;
+    padding: 5px 5px 22px;
+}
+
+.history-label {
+    color: #888888;
+    font-size: 12px;
+    padding: 22px 8px 9px;
+}
+
+/* TOP BAR */
+
+.topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 7px 22px;
-}
-
-.brand {
-    font-size: 19px;
-    font-weight: 650;
-    letter-spacing: -.6px;
-}
-
-.icon-button {
-    border: 0;
-    background: transparent;
-    color: #b5b5b5;
-    width: 38px;
-    height: 38px;
-    border-radius: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-}
-
-.icon-button:hover {
-    background: #303030;
-    color: white;
-}
-
-.icon-button svg {
-    width: 20px;
-    height: 20px;
-}
-
-.new-chat {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: transparent;
-    color: var(--text);
-    border: 0;
-    padding: 12px 10px;
-    border-radius: 9px;
-    font-size: 14px;
-    text-align: left;
-    cursor: pointer;
-}
-
-.new-chat:hover {
-    background: #292929;
-}
-
-.section-label {
-    color: #888;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 23px 10px 10px;
-}
-
-.history {
-    overflow-y: auto;
-    flex: 1;
-}
-
-.history-item {
-    width: 100%;
-    background: transparent;
-    color: #d5d5d5;
-    border: 0;
-    border-radius: 8px;
-    padding: 10px;
-    font-size: 13px;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    cursor: pointer;
-}
-
-.history-item:hover,
-.history-item.active {
-    background: #303030;
-}
-
-.sidebar-bottom {
-    color: #777;
-    font-size: 11px;
-    padding: 12px 9px 5px;
-}
-
-/* MAIN */
-
-.main {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-}
-
-.topbar {
-    height: 58px;
-    min-height: 58px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 22px;
-    background: var(--bg);
+    padding: 3px 0 12px;
+    border-bottom: 1px solid #333333;
+    margin-bottom: 12px;
 }
 
 .topbar-title {
     font-size: 16px;
     font-weight: 600;
+    color: #ECECEC;
 }
 
-/* CONVERSATION */
-
-.conversation {
-    flex: 1;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-    padding: 25px 20px 190px;
-}
-
-.messages {
-    width: 100%;
-    max-width: 760px;
-    margin: 0 auto;
-}
+/* WELCOME */
 
 .welcome {
-    min-height: 58vh;
+    min-height: 55vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 25px 10px;
 }
 
 .welcome h1 {
     font-size: 30px;
     font-weight: 600;
     letter-spacing: -1px;
-    margin: 0 0 12px;
+    color: #ECECEC;
+    margin-bottom: 9px;
 }
 
 .welcome p {
-    color: var(--muted);
     font-size: 14px;
-    margin: 0;
+    color: #999999;
 }
+
+/* SUGGESTIONS */
 
 .suggestions {
     display: flex;
-    flex-wrap: wrap;
     justify-content: center;
+    flex-wrap: wrap;
     gap: 9px;
-    margin-top: 32px;
+    margin-top: 25px;
 }
 
 .suggestion {
-    color: #d0d0d0;
-    background: transparent;
-    border: 1px solid #444;
-    border-radius: 18px;
+    border: 1px solid #454545;
+    color: #D0D0D0;
+    border-radius: 20px;
     padding: 9px 13px;
     font-size: 12px;
-    cursor: pointer;
+    background: transparent;
 }
 
-.suggestion:hover {
-    background: #303030;
-}
+/* USER MESSAGE */
 
-/* MESSAGES */
-
-.message {
-    width: 100%;
-    margin: 0 auto 25px;
+.user-row {
     display: flex;
-    flex-direction: column;
-    animation: appear .2s ease;
+    justify-content: flex-end;
+    width: 100%;
+    margin: 24px 0;
 }
 
-@keyframes appear {
-    from { opacity: 0; transform: translateY(5px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.message.user {
-    align-items: flex-end;
-}
-
-.bubble {
+.user-bubble {
     max-width: 85%;
-    overflow-wrap: anywhere;
-    line-height: 1.65;
-    font-size: 15px;
-}
-
-.user .bubble {
     background: #303030;
-    padding: 11px 17px;
+    color: #ECECEC;
     border-radius: 20px;
+    padding: 12px 17px;
+    font-size: 15px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
 }
 
-.assistant .bubble {
-    max-width: 100%;
-    padding: 3px 0;
-    line-height: 1.75;
+/* ASSISTANT MESSAGE */
+
+.assistant-content {
+    color: #ECECEC;
     font-size: 15.5px;
+    line-height: 1.8;
+    padding: 5px 0;
+    overflow-wrap: anywhere;
 }
 
-.assistant .bubble p {
-    margin: 0 0 15px;
+.assistant-content p {
+    margin-bottom: 15px;
 }
 
-.assistant .bubble pre {
+.assistant-content h1,
+.assistant-content h2,
+.assistant-content h3 {
+    color: #F0F0F0;
+}
+
+.assistant-content pre {
     background: #151515;
     border: 1px solid #404040;
-    padding: 15px;
     border-radius: 12px;
+    padding: 14px;
     overflow-x: auto;
 }
 
-.assistant .bubble code {
+.assistant-content code {
     background: #353535;
-    padding: 2px 5px;
     border-radius: 4px;
+    padding: 2px 5px;
 }
 
-.assistant .bubble pre code {
+.assistant-content pre code {
     background: transparent;
     padding: 0;
 }
 
-.assistant .bubble h1,
-.assistant .bubble h2,
-.assistant .bubble h3 {
-    font-size: 19px;
-    margin: 22px 0 12px;
+/* CHAT INPUT */
+
+[data-testid="stChatInput"] {
+    background: #303030 !important;
+    border: 1px solid #454545 !important;
+    border-radius: 26px !important;
+    box-shadow: none !important;
+    padding: 8px 12px !important;
 }
 
-.assistant .bubble ul,
-.assistant .bubble ol {
-    padding-left: 24px;
+[data-testid="stChatInput"]:focus-within {
+    border-color: #777777 !important;
 }
 
-.assistant .bubble blockquote {
-    border-left: 3px solid #666;
-    margin-left: 0;
-    padding-left: 15px;
-    color: #bdbdbd;
+[data-testid="stChatInput"] textarea {
+    color: #FFFFFF !important;
+    font-size: 15px !important;
 }
 
-.message-actions {
-    display: flex;
-    gap: 5px;
-    margin-top: 8px;
-    opacity: .6;
+[data-testid="stChatInput"] textarea::placeholder {
+    color: #999999 !important;
 }
 
-.message-actions button {
-    color: #aaa;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    padding: 5px;
-    border-radius: 6px;
-}
-
-.message-actions button:hover {
-    background: #333;
-    color: white;
-}
-
-.message-actions svg {
-    width: 16px;
-    height: 16px;
+[data-testid="stChatInput"] button {
+    background: #F0F0F0 !important;
+    color: #171717 !important;
+    border-radius: 50% !important;
 }
 
 /* THINKING */
 
-.thinking {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 12px 0;
+.stSpinner > div {
+    border-top-color: #FFFFFF !important;
 }
 
-.thinking span {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #aaa;
-    animation: pulse 1s infinite alternate;
-}
-
-.thinking span:nth-child(2) {
-    animation-delay: .2s;
-}
-
-.thinking span:nth-child(3) {
-    animation-delay: .4s;
-}
-
-@keyframes pulse {
-    from { opacity: .25; }
-    to { opacity: 1; }
-}
-
-/* COMPOSER */
-
-.composer-area {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 20px 18px 12px;
-    background: linear-gradient(
-        to bottom,
-        rgba(33,33,33,0),
-        #212121 23%
-    );
-    z-index: 5;
-}
-
-.composer-wrap {
-    max-width: 760px;
-    margin: auto;
-}
-
-.composer {
-    min-height: 58px;
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-    padding: 10px 12px 10px 18px;
-    background: #303030;
-    border: 1px solid #454545;
-    border-radius: 28px;
-    transition: border-color .2s;
-}
-
-.composer:focus-within {
-    border-color: #686868;
-}
-
-.composer textarea {
-    flex: 1;
-    min-width: 0;
-    resize: none;
-    outline: none;
-    border: 0;
-    background: transparent;
-    color: #fff;
-    font-family: inherit;
-    font-size: 15px;
-    line-height: 1.5;
-    padding: 7px 0;
-    max-height: 180px;
-}
-
-.composer textarea::placeholder {
-    color: #999;
-}
-
-.send-button {
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
-    border: none;
-    border-radius: 50%;
-    background: #f2f2f2;
-    color: #171717;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-}
-
-.send-button:disabled {
-    opacity: .4;
-    cursor: default;
-}
-
-.send-button svg {
-    width: 19px;
-    height: 19px;
-}
+/* FOOTER */
 
 .disclaimer {
-    color: #888;
+    color: #858585;
+    font-size: 11px;
     text-align: center;
-    font-size: 10px;
-    padding-top: 10px;
+    padding: 12px 0;
 }
 
 /* MOBILE */
 
-@media(max-width: 700px) {
-    .sidebar {
-        position: fixed;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 275px;
-        min-width: 275px;
-        box-shadow: 12px 0 35px rgba(0,0,0,.3);
-    }
+@media(max-width: 768px) {
 
-    .sidebar.hidden {
-        margin-left: -290px;
-    }
-
-    .topbar {
-        padding: 0 12px;
-    }
-
-    .conversation {
-        padding: 15px 16px 180px;
+    .block-container {
+        padding: 0.7rem 1rem 6rem;
     }
 
     .welcome {
@@ -513,675 +303,282 @@ body {
         font-size: 25px;
     }
 
-    .suggestion {
-        font-size: 11px;
+    .assistant-content {
+        font-size: 15px;
     }
 
-    .composer-area {
-        padding: 15px 12px 10px;
-    }
-
-    .bubble {
+    .user-bubble {
         font-size: 14px;
     }
 
-    .assistant .bubble {
-        font-size: 15px;
-    }
 }
 
 </style>
-</head>
+""", unsafe_allow_html=True)
 
-<body>
 
-<div class="app">
+# ==========================================
+# 4. SIDEBAR
+# ==========================================
 
-    <aside class="sidebar" id="sidebar">
+with st.sidebar:
 
-        <div class="sidebar-top">
-            <div class="brand">GhimireyGPT</div>
+    st.markdown(
+        '<div class="brand">GhimireyGPT</div>',
+        unsafe_allow_html=True
+    )
 
-            <button class="icon-button" onclick="toggleSidebar()"
-                aria-label="Close sidebar">
-                <svg viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="1.8">
-                    <rect x="3" y="4" width="18" height="16" rx="2"/>
-                    <path d="M9 4v16"/>
-                </svg>
-            </button>
-        </div>
+    if st.button("+  New chat", use_container_width=True):
 
-        <button class="new-chat" onclick="newChat()">
-            <svg width="19" height="19" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="1.8">
-                <path d="M12 5v14M5 12h14"/>
-            </svg>
-            New chat
-        </button>
+        st.session_state.chat_counter += 1
 
-        <div class="section-label">Your chats</div>
+        name = f"New chat {st.session_state.chat_counter}"
 
-        <div class="history" id="history"></div>
+        st.session_state.chats[name] = []
 
-        <div class="sidebar-bottom">GhimireyGPT</div>
+        st.session_state.current_chat = name
 
-    </aside>
+        st.rerun()
 
-    <main class="main">
+    st.markdown(
+        '<div class="history-label">Your chats</div>',
+        unsafe_allow_html=True
+    )
 
-        <header class="topbar">
+    for name in reversed(list(st.session_state.chats.keys())):
 
-            <button class="icon-button" onclick="toggleSidebar()"
-                aria-label="Open sidebar">
-                <svg viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="1.8">
-                    <rect x="3" y="4" width="18" height="16" rx="2"/>
-                    <path d="M9 4v16"/>
-                </svg>
-            </button>
+        if st.button(
+            name,
+            key="history_" + name,
+            use_container_width=True
+        ):
 
-            <div class="topbar-title">GhimireyGPT</div>
+            st.session_state.current_chat = name
+            st.rerun()
 
-        </header>
 
-        <section class="conversation" id="conversation">
+# ==========================================
+# 5. MAIN HEADER
+# ==========================================
 
-            <div class="messages" id="messages">
-
-                <div class="welcome" id="welcome">
-
-                    <h1>What can I help with?</h1>
-
-                    <p>Ask anything. Let's figure it out together.</p>
-
-                    <div class="suggestions">
-
-                        <button class="suggestion"
-                            onclick="useSuggestion('Explain something interesting to me')">
-                            Explain something
-                        </button>
-
-                        <button class="suggestion"
-                            onclick="useSuggestion('Help me write something')">
-                            Help me write
-                        </button>
-
-                        <button class="suggestion"
-                            onclick="useSuggestion('Give me some creative ideas')">
-                            Brainstorm ideas
-                        </button>
-
-                        <button class="suggestion"
-                            onclick="useSuggestion('Help me write some code')">
-                            Code with me
-                        </button>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
-
-        <div class="composer-area">
-
-            <div class="composer-wrap">
-
-                <form class="composer" id="chatForm">
-
-                    <textarea
-                        id="prompt"
-                        rows="1"
-                        placeholder="How's your day going?"
-                        aria-label="Message GhimireyGPT"
-                    ></textarea>
-
-                    <button class="send-button" id="sendButton"
-                        type="submit" aria-label="Send message">
-
-                        <svg viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor" stroke-width="2">
-                            <path d="M12 19V5M5 12l7-7 7 7"/>
-                        </svg>
-
-                    </button>
-
-                </form>
-
-                <div class="disclaimer">
-                    GhimireyGPT can make mistakes. Check important information.
-                </div>
-
-            </div>
-
-        </div>
-
-    </main>
-
+st.markdown("""
+<div class="topbar">
+    <div class="topbar-title">GhimireyGPT</div>
 </div>
+""", unsafe_allow_html=True)
 
-<script>
 
-// ==========================================
-// LOCAL CONVERSATION STORAGE
-// ==========================================
+# ==========================================
+# 6. CURRENT CHAT
+# ==========================================
 
-const STORAGE_KEY = "ghimireygpt_chats_v1";
+messages = st.session_state.chats[
+    st.session_state.current_chat
+]
 
-let chats = {};
-let currentChat = null;
-let busy = false;
 
-try {
-    chats = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-} catch (e) {
-    chats = {};
-}
+# ==========================================
+# 7. WELCOME SCREEN
+# ==========================================
 
-function saveChats() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
-}
+if not messages:
 
-function makeId() {
-    return "chat_" + Date.now() + "_" +
-        Math.random().toString(36).slice(2, 8);
-}
+    st.markdown("""
+    <div class="welcome">
 
-function newChat() {
-    currentChat = makeId();
+        <h1>What can I help with?</h1>
 
-    chats[currentChat] = {
-        title: "New chat",
-        messages: []
-    };
+        <p>Ask anything. Let's figure it out together.</p>
 
-    saveChats();
-    renderChat();
-    renderHistory();
+    </div>
+    """, unsafe_allow_html=True)
 
-    document.getElementById("prompt").focus();
-}
+    # Suggested prompts
 
-function ensureChat() {
-    if (!currentChat || !chats[currentChat]) {
-        newChat();
-    }
-}
+    col1, col2 = st.columns(2)
 
-// ==========================================
-// SIDEBAR
-// ==========================================
+    with col1:
+        if st.button("Explain something interesting", use_container_width=True):
+            st.session_state.suggested_prompt = "Explain something interesting to me."
+            st.rerun()
 
-function toggleSidebar() {
-    document.getElementById("sidebar").classList.toggle("hidden");
-}
+    with col2:
+        if st.button("Help me write something", use_container_width=True):
+            st.session_state.suggested_prompt = "Help me write something."
+            st.rerun()
 
-function renderHistory() {
-    const history = document.getElementById("history");
-    history.innerHTML = "";
 
-    Object.keys(chats).reverse().forEach(id => {
-        const button = document.createElement("button");
+# ==========================================
+# 8. DISPLAY MESSAGES
+# ==========================================
 
-        button.className = "history-item" +
-            (id === currentChat ? " active" : "");
+for message in messages:
 
-        button.textContent = chats[id].title || "New chat";
+    if message["role"] == "user":
 
-        button.onclick = () => {
-            currentChat = id;
-            renderChat();
-            renderHistory();
+        safe_text = html.escape(
+            message["content"]
+        ).replace("\n", "<br>")
 
-            if (window.innerWidth <= 700) {
-                document.getElementById("sidebar")
-                    .classList.add("hidden");
-            }
-        };
-
-        history.appendChild(button);
-    });
-}
-
-// ==========================================
-// MESSAGE RENDERING
-// ==========================================
-
-function formatAssistant(text) {
-    if (window.marked && window.DOMPurify) {
-        return DOMPurify.sanitize(marked.parse(text));
-    }
-
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML.replace(/\n/g, "<br>");
-}
-
-function addMessage(role, text, save = true) {
-    const messages = document.getElementById("messages");
-    const welcome = document.getElementById("welcome");
-
-    if (welcome) welcome.remove();
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "message " + role;
-
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-
-    if (role === "assistant") {
-        bubble.innerHTML = formatAssistant(text);
-    } else {
-        bubble.textContent = text;
-    }
-
-    wrapper.appendChild(bubble);
-
-    if (role === "assistant") {
-        const actions = document.createElement("div");
-        actions.className = "message-actions";
-
-        const copy = document.createElement("button");
-        copy.title = "Copy response";
-        copy.innerHTML = `
-            <svg viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" stroke-width="1.8">
-                <rect x="8" y="8" width="12" height="12" rx="2"/>
-                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>
-            </svg>
-        `;
-
-        copy.onclick = async () => {
-            try {
-                await navigator.clipboard.writeText(text);
-                copy.style.color = "#fff";
-                setTimeout(() => copy.style.color = "", 900);
-            } catch (e) {}
-        };
-
-        actions.appendChild(copy);
-        wrapper.appendChild(actions);
-    }
-
-    messages.appendChild(wrapper);
-    scrollToBottom();
-}
-
-function renderChat() {
-    const messages = document.getElementById("messages");
-
-    messages.innerHTML = "";
-
-    if (!currentChat || !chats[currentChat]) {
-        messages.innerHTML = `
-            <div class="welcome" id="welcome">
-                <h1>What can I help with?</h1>
-                <p>Ask anything. Let's figure it out together.</p>
+        st.markdown(
+            f"""
+            <div class="user-row">
+                <div class="user-bubble">{safe_text}</div>
             </div>
-        `;
-        return;
-    }
-
-    const chat = chats[currentChat];
-
-    if (chat.messages.length === 0) {
-        messages.innerHTML = `
-            <div class="welcome" id="welcome">
-                <h1>What can I help with?</h1>
-                <p>Ask anything. Let's figure it out together.</p>
-                <div class="suggestions">
-                    <button class="suggestion"
-                        onclick="useSuggestion('Explain something interesting to me')">
-                        Explain something
-                    </button>
-                    <button class="suggestion"
-                        onclick="useSuggestion('Help me write something')">
-                        Help me write
-                    </button>
-                    <button class="suggestion"
-                        onclick="useSuggestion('Give me some creative ideas')">
-                        Brainstorm ideas
-                    </button>
-                    <button class="suggestion"
-                        onclick="useSuggestion('Help me write some code')">
-                        Code with me
-                    </button>
-                </div>
-            </div>
-        `;
-        return;
-    }
-
-    chat.messages.forEach(msg => {
-        addMessage(msg.role, msg.content, false);
-    });
-
-    scrollToBottom();
-}
-
-function scrollToBottom() {
-    const conversation = document.getElementById("conversation");
-
-    requestAnimationFrame(() => {
-        conversation.scrollTop = conversation.scrollHeight;
-    });
-}
-
-// ==========================================
-// SUGGESTIONS
-// ==========================================
-
-function useSuggestion(text) {
-    document.getElementById("prompt").value = text;
-    document.getElementById("chatForm").requestSubmit();
-}
-
-// ==========================================
-// THINKING INDICATOR
-// ==========================================
-
-function showThinking() {
-    const messages = document.getElementById("messages");
-
-    const indicator = document.createElement("div");
-    indicator.className = "thinking";
-    indicator.id = "thinking";
-
-    indicator.innerHTML = `
-        <span></span>
-        <span></span>
-        <span></span>
-    `;
-
-    messages.appendChild(indicator);
-    scrollToBottom();
-}
-
-function removeThinking() {
-    const indicator = document.getElementById("thinking");
-    if (indicator) indicator.remove();
-}
-
-// ==========================================
-// SEND MESSAGE
-// ==========================================
-
-async function sendMessage(text) {
-
-    if (busy || !text.trim()) return;
-
-    ensureChat();
-
-    busy = true;
-
-    const input = document.getElementById("prompt");
-    const button = document.getElementById("sendButton");
-
-    input.value = "";
-    input.style.height = "auto";
-    button.disabled = true;
-
-    const chat = chats[currentChat];
-
-    chat.messages.push({
-        role: "user",
-        content: text
-    });
-
-    if (chat.messages.length === 1) {
-        chat.title = text.slice(0, 35);
-    }
-
-    saveChats();
-    renderHistory();
-
-    addMessage("user", text);
-
-    showThinking();
-
-    try {
-
-        const response = await fetch("/api/chat", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                messages: chat.messages
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || "Something went wrong.");
-        }
-
-        const answer = data.reply;
-
-        if (!answer) {
-            throw new Error("The AI returned an empty response.");
-        }
-
-        removeThinking();
-
-        chat.messages.push({
-            role: "assistant",
-            content: answer
-        });
-
-        saveChats();
-
-        addMessage("assistant", answer);
-
-    } catch (error) {
-
-        removeThinking();
-
-        addMessage(
-            "assistant",
-            "Sorry, something went wrong: " + error.message
-        );
-
-    } finally {
-
-        busy = false;
-        button.disabled = false;
-        input.focus();
-
-    }
-}
-
-// ==========================================
-// FORM EVENTS
-// ==========================================
-
-document.getElementById("chatForm")
-    .addEventListener("submit", event => {
-
-        event.preventDefault();
-
-        const input = document.getElementById("prompt");
-        const text = input.value.trim();
-
-        sendMessage(text);
-    });
-
-const promptInput = document.getElementById("prompt");
-
-promptInput.addEventListener("input", () => {
-    promptInput.style.height = "auto";
-
-    promptInput.style.height =
-        Math.min(promptInput.scrollHeight, 180) + "px";
-});
-
-promptInput.addEventListener("keydown", event => {
-    if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        document.getElementById("chatForm").requestSubmit();
-    }
-});
-
-// ==========================================
-// STARTUP
-// ==========================================
-
-if (Object.keys(chats).length > 0) {
-    currentChat = Object.keys(chats).at(-1);
-} else {
-    currentChat = makeId();
-
-    chats[currentChat] = {
-        title: "New chat",
-        messages: []
-    };
-}
-
-renderHistory();
-renderChat();
-
-if (window.innerWidth <= 700) {
-    document.getElementById("sidebar").classList.add("hidden");
-}
-
-</script>
-
-</body>
-</html>
-"""
-
-
-# ==========================================
-# 2. HOME PAGE
-# ==========================================
-
-@app.route("/")
-def home():
-    return render_template_string(PAGE)
-
-
-# ==========================================
-# 3. AI BACKEND
-# ==========================================
-
-@app.route("/api/chat", methods=["POST"])
-def chat():
-
-    if not API_KEY:
-        return jsonify({
-            "error": "API key is missing from server settings."
-        }), 500
-
-    data = request.get_json(silent=True) or {}
-    messages = data.get("messages", [])
-
-    if not isinstance(messages, list) or not messages:
-        return jsonify({
-            "error": "No messages were provided."
-        }), 400
-
-    if len(messages) > 60:
-        messages = messages[-60:]
-
-    safe_messages = [{
-        "role": "system",
-        "content": (
-            "You are a helpful, intelligent, natural conversational "
-            "AI assistant. Be clear, direct, thoughtful and friendly. "
-            "Adapt to the user's tone. Avoid robotic introductions, "
-            "unnecessary filler and excessive headings."
-        )
-    }]
-
-    for message in messages:
-
-        if not isinstance(message, dict):
-            continue
-
-        role = message.get("role")
-        content = message.get("content")
-
-        if role not in ("user", "assistant"):
-            continue
-
-        if not isinstance(content, str):
-            continue
-
-        safe_messages.append({
-            "role": role,
-            "content": content[:20000]
-        })
-
-    try:
-
-        result = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {API_KEY}",
-                "Content-Type": "application/json",
-                "X-Title": "GhimireyGPT"
-            },
-            json={
-                "model": MODEL,
-                "messages": safe_messages,
-                "temperature": 0.7
-            },
-            timeout=120
+            """,
+            unsafe_allow_html=True
         )
 
-        if not result.ok:
+    else:
 
-            try:
-                details = result.json().get("error", {}).get(
-                    "message", "OpenRouter request failed."
-                )
-            except Exception:
-                details = "OpenRouter request failed."
+        st.markdown(
+            '<div class="assistant-content">',
+            unsafe_allow_html=True
+        )
 
-            return jsonify({
-                "error": str(details)[:500]
-            }), result.status_code
+        st.markdown(message["content"])
 
-        result_data = result.json()
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True
+        )
 
-        reply = result_data["choices"][0]["message"]["content"]
 
-        if isinstance(reply, list):
-            reply = "\n".join(
-                item.get("text", "")
-                for item in reply
-                if isinstance(item, dict)
+# ==========================================
+# 9. MESSAGE INPUT
+# ==========================================
+
+if "suggested_prompt" in st.session_state:
+
+    prompt = st.session_state.pop("suggested_prompt")
+
+else:
+
+    prompt = st.chat_input(
+        "How's your day going?"
+    )
+
+
+# ==========================================
+# 10. PROCESS MESSAGE
+# ==========================================
+
+if prompt:
+
+    messages = st.session_state.chats[
+        st.session_state.current_chat
+    ]
+
+    messages.append({
+        "role": "user",
+        "content": prompt
+    })
+
+    # Rename first conversation
+
+    if len(messages) == 1:
+
+        old_name = st.session_state.current_chat
+
+        new_name = prompt.strip()[:32] or "New conversation"
+
+        if new_name in st.session_state.chats:
+
+            st.session_state.chat_counter += 1
+
+            new_name = (
+                new_name + " " +
+                str(st.session_state.chat_counter)
             )
 
-        return jsonify({
-            "reply": str(reply)
-        })
+        st.session_state.chats[new_name] = messages
 
-    except requests.Timeout:
+        del st.session_state.chats[old_name]
 
-        return jsonify({
-            "error": "The AI took too long to respond. Try again."
-        }), 504
+        st.session_state.current_chat = new_name
 
-    except Exception as error:
+    # API KEY CHECK
 
-        app.logger.exception("Chat request failed")
+    if not API_KEY:
 
-        return jsonify({
-            "error": "The server could not complete your request."
-        }), 500
+        st.error(
+            "API key missing. Check your Streamlit Secrets."
+        )
+
+    else:
+
+        try:
+
+            llm = ChatOpenAI(
+                model=MODEL,
+                api_key=API_KEY,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.7,
+                timeout=120
+            )
+
+            conversation = [
+                SystemMessage(
+                    content=(
+                        "You are a highly intelligent, natural and "
+                        "friendly AI assistant. Respond conversationally. "
+                        "Be direct, useful and thoughtful. Avoid robotic "
+                        "introductions, unnecessary filler and excessive "
+                        "headings. Adapt to the user's tone."
+                    )
+                )
+            ]
+
+            for msg in messages:
+
+                if msg["role"] == "user":
+
+                    conversation.append(
+                        HumanMessage(content=msg["content"])
+                    )
+
+                else:
+
+                    conversation.append(
+                        AIMessage(content=msg["content"])
+                    )
+
+            with st.spinner("Thinking..."):
+
+                response = llm.invoke(conversation)
+
+            answer = response.content
+
+            if isinstance(answer, list):
+
+                answer = "\n".join(
+                    str(item.get("text", item))
+                    if isinstance(item, dict)
+                    else str(item)
+                    for item in answer
+                )
+
+            messages.append({
+                "role": "assistant",
+                "content": str(answer)
+            })
+
+        except Exception as error:
+
+            st.error(
+                f"Something went wrong: {error}"
+            )
+
+    st.rerun()
 
 
 # ==========================================
-# 4. START SERVER
+# 11. FOOTER
 # ==========================================
 
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        debug=False
-    )
+st.markdown(
+    '<div class="disclaimer">'
+    'GhimireyGPT can make mistakes. Check important information.'
+    '</div>',
+    unsafe_allow_html=True
+)
