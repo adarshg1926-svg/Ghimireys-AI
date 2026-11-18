@@ -1,6 +1,8 @@
+import io
 import os
 import html
 import uuid
+import base64
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -26,6 +28,9 @@ try:
     API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
 except Exception:
     API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+APP_NAME = "G-GPT"
+APP_VERSION = "v1.0"
 
 MODEL = "openrouter/free"
 BASE_URL = "https://openrouter.ai/api/v1"
@@ -58,6 +63,11 @@ PERSONALITY:
 - Explain difficult things simply.
 - Give detailed answers when necessary.
 """
+
+TEXT_TYPES = ["txt", "md", "csv", "json", "py", "js", "html", "css", "xml", "yaml", "yml", "log"]
+IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
+FILE_TYPES = TEXT_TYPES + IMAGE_TYPES + ["pdf"]
+MAX_FILE_CHARS = 20000
 
 SUGGESTIONS = [
     ("Explain something interesting", "Explain something interesting to me."),
@@ -134,7 +144,46 @@ footer {
 
 .block-container {
     max-width: 768px;
-    padding: 1.5rem 1.25rem 9rem;
+    padding: 4.5rem 1.25rem 9rem;
+}
+
+/* ---------- FIXED TOP HEADER ---------- */
+
+.app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    z-index: 999980;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: linear-gradient(to bottom, var(--bg) 70%, rgba(33,33,33,0));
+    pointer-events: none;
+}
+
+.app-header .app-name {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #FFFFFF;
+}
+
+.app-header .app-version {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+}
+
+@media (min-width: 769px) {
+    .stApp:has(section[data-testid="stSidebar"][aria-expanded="true"]) .app-header {
+        left: 21rem;
+    }
 }
 
 /* ---------- SIDEBAR ---------- */
@@ -362,6 +411,33 @@ div.st-key-new_chat button {
     padding: 8px 12px;
 }
 
+.file-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin: 18px 0 -8px;
+}
+
+.file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 240px;
+    background: var(--bg-user);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--text);
+}
+
+.file-chip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ---------- THINKING DOTS ---------- */
 
 .thinking {
@@ -406,6 +482,14 @@ div.st-key-new_chat button {
 
 [data-testid="stChatInput"]:focus-within {
     border-color: #555 !important;
+}
+
+/* remove Streamlit's red focus outline */
+[data-testid="stChatInput"] div,
+[data-testid="stChatInput"] textarea {
+    border-color: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
 [data-testid="stChatInput"] > div,
@@ -460,12 +544,52 @@ div.st-key-new_chat button {
 THINKING_HTML = '<div class="thinking"><span></span><span></span><span></span></div>'
 
 
-def render_user(text):
-    safe = html.escape(text).replace("\n", "<br>")
-    st.markdown(
-        f'<div class="user-row"><div class="user-bubble">{safe}</div></div>',
-        unsafe_allow_html=True,
-    )
+CLIP_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66'
+    'l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>'
+)
+
+
+def render_user(text, attachments=None):
+    if attachments:
+        chips = "".join(
+            f'<div class="file-chip">{CLIP_SVG}<span>{html.escape(a["name"])}</span></div>'
+            for a in attachments
+        )
+        st.markdown(f'<div class="file-chips">{chips}</div>', unsafe_allow_html=True)
+    if text:
+        safe = html.escape(text).replace("\n", "<br>")
+        st.markdown(
+            f'<div class="user-row"><div class="user-bubble">{safe}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def read_attachment(uploaded):
+    name = uploaded.name
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    data = uploaded.getvalue()
+
+    if ext in IMAGE_TYPES:
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+        return {"name": name, "kind": "image", "mime": mime,
+                "data": base64.b64encode(data).decode()}
+
+    if ext == "pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        except Exception:
+            text = "(Could not read this PDF. Install pypdf or try a text-based PDF.)"
+    else:
+        text = data.decode("utf-8", errors="replace")
+
+    if len(text) > MAX_FILE_CHARS:
+        text = text[:MAX_FILE_CHARS] + "\n...[file truncated]"
+    return {"name": name, "kind": "text", "text": text}
 
 
 def chunk_to_text(content):
@@ -483,7 +607,22 @@ def build_conversation(messages):
     conversation = [SystemMessage(content=SYSTEM_PROMPT)]
     for msg in messages:
         if msg["role"] == "user":
-            conversation.append(HumanMessage(content=msg["content"]))
+            text = msg["content"]
+            attachments = msg.get("attachments", [])
+            for a in attachments:
+                if a["kind"] == "text":
+                    text += f"\n\n[Attached file: {a['name']}]\n{a['text']}"
+            images = [a for a in attachments if a["kind"] == "image"]
+            if images:
+                parts = [{"type": "text", "text": text or "Describe this image."}]
+                parts += [
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:{a['mime']};base64,{a['data']}"}}
+                    for a in images
+                ]
+                conversation.append(HumanMessage(content=parts))
+            else:
+                conversation.append(HumanMessage(content=text))
         else:
             conversation.append(AIMessage(content=msg["content"]))
     return conversation
@@ -520,6 +659,13 @@ with st.sidebar:
             st.rerun()
 
 
+st.markdown(
+    f'<div class="app-header"><span class="app-name">{APP_NAME}</span>'
+    f'<span class="app-version">{APP_VERSION}</span></div>',
+    unsafe_allow_html=True,
+)
+
+
 # =====================================================
 # 6. CURRENT CONVERSATION
 # =====================================================
@@ -549,7 +695,7 @@ if not messages:
 # Past messages
 for i, msg in enumerate(messages):
     if msg["role"] == "user":
-        render_user(msg["content"])
+        render_user(msg["content"], msg.get("attachments"))
     else:
         with st.container(key=f"assistant_{st.session_state.current_chat}_{i}"):
             st.markdown(msg["content"])
@@ -559,9 +705,23 @@ for i, msg in enumerate(messages):
 # 7. INPUT
 # =====================================================
 
-typed = st.chat_input("Message GhimireyGPT")
+submitted = st.chat_input(
+    "Message GhimireyGPT",
+    accept_file="multiple",
+    file_type=FILE_TYPES,
+)
 
-prompt = st.session_state.suggested_prompt or typed
+prompt = None
+uploads = []
+
+if st.session_state.suggested_prompt:
+    prompt = st.session_state.suggested_prompt
+elif submitted:
+    prompt = (submitted.text or "").strip()
+    uploads = list(submitted.files or [])
+    if not prompt and uploads:
+        prompt = ""
+
 st.session_state.suggested_prompt = None
 
 
@@ -569,12 +729,13 @@ st.session_state.suggested_prompt = None
 # 8. HANDLE NEW MESSAGE (STREAMING)
 # =====================================================
 
-if prompt:
-    messages.append({"role": "user", "content": prompt})
-    render_user(prompt)
+if prompt or uploads:
+    attachments = [read_attachment(f) for f in uploads]
+    messages.append({"role": "user", "content": prompt, "attachments": attachments})
+    render_user(prompt, attachments)
 
     if len(messages) == 1:
-        title = prompt.strip().replace("\n", " ")
+        title = (prompt or attachments[0]["name"]).strip().replace("\n", " ")
         chat["title"] = (title[:34] + "…") if len(title) > 34 else title
 
     if not API_KEY:
