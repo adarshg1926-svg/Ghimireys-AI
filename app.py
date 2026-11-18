@@ -1,242 +1,293 @@
 
 import os
-
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import (
-    AIMessage,
-    HumanMessage,
     SystemMessage,
+    HumanMessage,
+    AIMessage
 )
 
-# Load local environment variables
 load_dotenv()
 
+# ---------------- PAGE CONFIG ----------------
 
-# Get API key from Streamlit Secrets or local environment
-def get_api_key():
-    try:
-        key = st.secrets.get("OPENROUTER_API_KEY", "")
-        if key:
-            return str(key).strip()
-    except Exception:
-        pass
-
-    return os.getenv("OPENROUTER_API_KEY", "").strip()
-
-
-# Page configuration
 st.set_page_config(
-    page_title="Ghimireys AI",
-    page_icon="💬",
-    layout="centered",
+    page_title="GhimireyGPT",
+    page_icon="G",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+# ---------------- API KEY ----------------
 
-# Custom styling
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background: linear-gradient(
-            135deg,
-            #101827 0%,
-            #172554 100%
-        );
-        color: #f8fafc;
+try:
+    API_KEY = st.secrets.get("OPENROUTER_API_KEY", "")
+except Exception:
+    API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+# ---------------- CUSTOM DESIGN ----------------
+
+st.markdown("""
+<style>
+
+/* Main background */
+.stApp {
+    background-color: #212121;
+    color: #ECECEC;
+}
+
+/* Remove Streamlit branding */
+#MainMenu, footer, header {
+    visibility: hidden;
+}
+
+/* Hide default deploy button */
+.stDeployButton {
+    display: none;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background-color: #171717;
+    border-right: 1px solid #303030;
+}
+
+/* Sidebar text */
+section[data-testid="stSidebar"] * {
+    color: #ECECEC;
+}
+
+/* Main content */
+.block-container {
+    max-width: 900px;
+    padding-top: 2rem;
+    padding-bottom: 7rem;
+}
+
+/* Titles */
+h1, h2, h3 {
+    color: #ECECEC !important;
+    font-weight: 600 !important;
+}
+
+/* Chat messages */
+[data-testid="stChatMessage"] {
+    background: transparent;
+    border: none;
+    padding: 1rem 0;
+}
+
+/* Chat input container */
+[data-testid="stChatInput"] {
+    border-radius: 25px !important;
+    background-color: #303030 !important;
+    border: 1px solid #454545 !important;
+}
+
+/* Input field */
+[data-testid="stChatInput"] textarea {
+    color: #FFFFFF !important;
+}
+
+/* Buttons */
+.stButton button {
+    background-color: #303030;
+    color: #ECECEC;
+    border: 1px solid #454545;
+    border-radius: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+}
+
+.stButton button:hover {
+    background-color: #404040;
+    border-color: #666666;
+}
+
+/* Welcome heading */
+.welcome-title {
+    font-size: 2.3rem;
+    font-weight: 600;
+    text-align: center;
+    color: #ECECEC;
+    margin-top: 18vh;
+    margin-bottom: 2rem;
+}
+
+/* Watermark */
+.watermark {
+    color: #777777;
+    font-size: 11px;
+    text-align: center;
+    padding-top: 12px;
+}
+
+/* Remove top padding on mobile */
+@media (max-width: 768px) {
+    .block-container {
+        padding-top: 1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
     }
 
-    [data-testid="stHeader"] {
-        background: transparent;
+    .welcome-title {
+        font-size: 1.8rem;
+        margin-top: 14vh;
     }
+}
 
-    [data-testid="stChatMessage"] {
-        border: 1px solid rgba(148,163,184,0.18);
-        border-radius: 14px;
-        padding: 10px 14px;
-        background: rgba(15,23,42,0.55);
-    }
+</style>
+""", unsafe_allow_html=True)
 
-    [data-testid="stSidebar"] {
-        background: #0b1220;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ---------------- SESSION STATE ----------------
 
+if "chats" not in st.session_state:
+    st.session_state.chats = {"New chat": []}
 
-# Initialize conversation history
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = "New chat"
 
+if "chat_counter" not in st.session_state:
+    st.session_state.chat_counter = 0
 
-# Main heading
-st.title("💬 Ghimireys AI")
-st.caption(
-    "Your personal AI assistant powered by "
-    "LangChain and OpenRouter."
-)
+# ---------------- SIDEBAR ----------------
 
-
-# Sidebar settings
 with st.sidebar:
 
-    st.header("⚙️ Settings")
+    st.markdown("## GhimireyGPT")
 
-    saved_api_key = get_api_key()
-
-    api_key_override = st.text_input(
-        "API Key Override (optional)",
-        type="password",
-        help="Leave blank to use your saved Streamlit Secret.",
-    )
-
-    api_key = api_key_override.strip() or saved_api_key
-
-    model_name = st.text_input(
-        "Model ID",
-        value="openrouter/free",
-    )
-
-    temperature = st.slider(
-        "Creativity",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.7,
-        step=0.1,
-    )
-
-    system_prompt = st.text_area(
-        "Bot Instructions",
-        value="You are a helpful, clear, and friendly AI assistant.",
-        height=100,
-    )
-
-    if st.button(
-        "🗑️ Clear Conversation",
-        use_container_width=True,
-    ):
-        st.session_state.chat_history = []
+    if st.button("+  New chat", key="new_chat", use_container_width=True):
+        st.session_state.chat_counter += 1
+        name = f"New chat {st.session_state.chat_counter}"
+        st.session_state.chats[name] = []
+        st.session_state.current_chat = name
         st.rerun()
 
-    st.divider()
+    st.markdown("---")
+    st.caption("Your chats")
 
-    if saved_api_key:
-        st.caption("API key loaded successfully.")
-    else:
-        st.caption(
-            "Add OPENROUTER_API_KEY in Streamlit Secrets."
-        )
+    for chat_name in reversed(list(st.session_state.chats.keys())):
+        if st.button(
+            chat_name,
+            key=f"chat_{chat_name}",
+            use_container_width=True
+        ):
+            st.session_state.current_chat = chat_name
+            st.rerun()
 
+    st.markdown("---")
+    st.caption("GhimireyGPT")
 
-# Display previous messages
-for message in st.session_state.chat_history:
+# ---------------- CURRENT CHAT ----------------
+
+messages = st.session_state.chats[
+    st.session_state.current_chat
+]
+
+# ---------------- WELCOME SCREEN ----------------
+
+if not messages:
+    st.markdown(
+        '<div class="welcome-title">What can I help with?</div>',
+        unsafe_allow_html=True
+    )
+
+# ---------------- DISPLAY CHAT ----------------
+
+for message in messages:
 
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# ---------------- MESSAGE INPUT ----------------
 
-# Chat input
-user_prompt = st.chat_input("Type your message...")
+prompt = st.chat_input("How's your day going?")
 
+if prompt:
 
-if user_prompt:
+    messages.append({
+        "role": "user",
+        "content": prompt
+    })
 
-    st.session_state.chat_history.append(
-        {
-            "role": "user",
-            "content": user_prompt,
-        }
-    )
+    # Give the first chat a meaningful title
+    if len(messages) == 1:
+        title = prompt[:30]
+        old_name = st.session_state.current_chat
+
+        if old_name == "New chat":
+            new_name = title
+            st.session_state.chats[new_name] = messages
+            del st.session_state.chats[old_name]
+            st.session_state.current_chat = new_name
 
     with st.chat_message("user"):
-        st.markdown(user_prompt)
+        st.markdown(prompt)
 
-    if not api_key:
+    with st.chat_message("assistant"):
 
-        st.error(
-            "API key not found. Please configure "
-            "OPENROUTER_API_KEY in Streamlit Secrets."
-        )
+        if not API_KEY:
+            st.error("API key is missing. Please check your Streamlit Secrets.")
 
-    elif not model_name.strip():
+        else:
+            try:
+                llm = ChatOpenAI(
+                    model="openrouter/free",
+                    openai_api_key=API_KEY,
+                    openai_api_base="https://openrouter.ai/api/v1",
+                    temperature=0.7,
+                    default_headers={
+                        "HTTP-Referer": "https://ghimireygpt.streamlit.app",
+                        "X-Title": "GhimireyGPT"
+                    }
+                )
 
-        st.error("Please enter a valid model ID.")
-
-    else:
-
-        try:
-
-            # Initialize LangChain model
-            llm = ChatOpenAI(
-                model=model_name.strip(),
-                api_key=api_key,
-                base_url="https://openrouter.ai/api/v1",
-                temperature=temperature,
-                default_headers={
-                    "HTTP-Referer": "https://share.streamlit.io/",
-                    "X-Title": "Ghimireys AI",
-                },
-            )
-
-            # Prepare conversation messages
-            messages = [
-                SystemMessage(content=system_prompt)
-            ]
-
-            for item in st.session_state.chat_history:
-
-                if item["role"] == "user":
-
-                    messages.append(
-                        HumanMessage(content=item["content"])
+                chat_messages = [
+                    SystemMessage(
+                        content="You are a helpful, intelligent, friendly AI assistant. "
+                                "Give clear, natural and useful answers."
                     )
+                ]
 
-                elif item["role"] == "assistant":
+                for msg in messages:
+                    if msg["role"] == "user":
+                        chat_messages.append(
+                            HumanMessage(content=msg["content"])
+                        )
+                    else:
+                        chat_messages.append(
+                            AIMessage(content=msg["content"])
+                        )
 
-                    messages.append(
-                        AIMessage(content=item["content"])
-                    )
-
-            # Generate response
-            with st.chat_message("assistant"):
-
-                with st.spinner("Thinking..."):
-
-                    response = llm.invoke(messages)
+                response = llm.invoke(chat_messages)
 
                 answer = response.content
 
                 if isinstance(answer, list):
-
                     answer = "\n".join(
-                        block.get("text", str(block))
-                        if isinstance(block, dict)
-                        else str(block)
-                        for block in answer
+                        str(item.get("text", item))
+                        if isinstance(item, dict) else str(item)
+                        for item in answer
                     )
-
-                answer = str(answer)
 
                 st.markdown(answer)
 
-            # Save assistant response
-            st.session_state.chat_history.append(
-                {
+                messages.append({
                     "role": "assistant",
-                    "content": answer,
-                }
-            )
+                    "content": answer
+                })
 
-        except Exception as error:
+            except Exception as e:
+                st.error(f"Something went wrong: {e}")
 
-            st.error(
-                f"OpenRouter request failed: {error}"
-            )
+    st.rerun()
 
-            st.caption(
-                "Check your API key, model ID, internet "
-                "connection, and OpenRouter model availability."
-            )
+# ---------------- FOOTER ----------------
+
+st.markdown(
+    '<div class="watermark">GhimireyGPT · How\'s your day going?</div>',
+    unsafe_allow_html=True
+)
