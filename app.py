@@ -1,16 +1,13 @@
-
 import os
 import html
+import uuid
+
 import streamlit as st
 import streamlit.components.v1 as components
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import (
-    SystemMessage,
-    HumanMessage,
-    AIMessage
-)
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 # =====================================================
 # 1. CONFIGURATION
@@ -22,7 +19,7 @@ st.set_page_config(
     page_title="GhimireyGPT",
     page_icon="G",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="auto",
 )
 
 try:
@@ -31,20 +28,61 @@ except Exception:
     API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 MODEL = "openrouter/free"
+BASE_URL = "https://openrouter.ai/api/v1"
+
+SYSTEM_PROMPT = """
+Your name is GhimireyGPT.
+
+You are GhimireyGPT, the AI assistant powering the GhimireyGPT project.
+
+IDENTITY RULES:
+- Your name is ALWAYS GhimireyGPT.
+- Never introduce yourself as ERNIE Bot.
+- Never introduce yourself as Wenxin Yiyan.
+- Never claim to be ChatGPT, Gemini, Claude, or another AI assistant.
+- Never confuse your underlying model with your assistant identity.
+- If asked your name, answer: "I'm GhimireyGPT. What can I help you with?"
+
+You may discuss other AI systems when asked,
+but your own identity remains GhimireyGPT.
+
+PERSONALITY:
+- Be natural, intelligent and conversational.
+- Be friendly without excessive flattery.
+- Be direct and honest.
+- Disagree when the facts support disagreement.
+- Avoid robotic introductions.
+- Avoid unnecessary filler.
+- Use headings only when useful.
+- Adapt to the user's communication style.
+- Explain difficult things simply.
+- Give detailed answers when necessary.
+"""
+
+SUGGESTIONS = [
+    ("Explain something interesting", "Explain something interesting to me."),
+    ("Help me write something", "Help me write something."),
+    ("Teach me a new skill", "Teach me a useful new skill in 10 minutes."),
+    ("Plan my day", "Help me plan a productive day."),
+]
 
 
 # =====================================================
 # 2. SESSION STATE
 # =====================================================
 
+def new_chat():
+    chat_id = uuid.uuid4().hex[:8]
+    st.session_state.chats[chat_id] = {"title": "New chat", "messages": []}
+    st.session_state.current_chat = chat_id
+
+
 if "chats" not in st.session_state:
-    st.session_state.chats = {"New chat": []}
+    st.session_state.chats = {}
+    new_chat()
 
 if "current_chat" not in st.session_state:
-    st.session_state.current_chat = "New chat"
-
-if "chat_counter" not in st.session_state:
-    st.session_state.chat_counter = 0
+    new_chat()
 
 if "suggested_prompt" not in st.session_state:
     st.session_state.suggested_prompt = None
@@ -56,16 +94,34 @@ if "suggested_prompt" not in st.session_state:
 
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* MAIN PAGE */
+:root {
+    --bg: #212121;
+    --bg-sidebar: #171717;
+    --bg-input: #2F2F2F;
+    --bg-hover: #2A2A2A;
+    --bg-user: #2F2F2F;
+    --border: #3A3A3A;
+    --text: #ECECEC;
+    --text-dim: #9B9B9B;
+    --accent: #FFFFFF;
+}
+
+html, body, .stApp, [class*="st-"], button, input, textarea {
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- PAGE ---------- */
 
 .stApp {
-    background: #212121;
-    color: #ECECEC;
+    background: var(--bg);
+    color: var(--text);
 }
 
 header[data-testid="stHeader"] {
-    background: #212121;
+    background: transparent;
 }
 
 [data-testid="stToolbar"],
@@ -77,630 +133,508 @@ footer {
 }
 
 .block-container {
-    max-width: 850px;
-    padding: 1rem 1.25rem 7rem;
+    max-width: 768px;
+    padding: 1.5rem 1.25rem 9rem;
 }
 
-/* SIDEBAR */
+/* ---------- SIDEBAR ---------- */
 
 section[data-testid="stSidebar"] {
-    background: #171717;
-    border-right: 1px solid #333333;
+    background: var(--bg-sidebar);
+    border-right: none;
 }
 
 section[data-testid="stSidebar"] .block-container {
-    padding: 1.2rem 1rem;
+    padding: 1rem 0.75rem;
 }
 
 section[data-testid="stSidebar"] .stButton button {
     background: transparent !important;
-    color: #ECECEC !important;
+    color: var(--text) !important;
     border: none !important;
-    border-radius: 9px !important;
+    border-radius: 10px !important;
+    justify-content: flex-start !important;
     text-align: left !important;
-    padding: 10px 12px !important;
+    padding: 9px 12px !important;
     font-size: 14px !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
+    transition: background 0.15s ease;
+}
+
+section[data-testid="stSidebar"] .stButton button p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 section[data-testid="stSidebar"] .stButton button:hover {
-    background: #303030 !important;
+    background: var(--bg-hover) !important;
 }
 
-/* BRAND */
+div.st-key-new_chat button {
+    font-weight: 500 !important;
+    border: 1px solid var(--border) !important;
+    margin-bottom: 6px;
+}
 
 .brand {
-    font-size: 21px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: var(--text);
+    padding: 4px 8px 18px;
+}
+
+.brand-mark, .assistant-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #171717;
+    font-size: 14px;
     font-weight: 700;
-    letter-spacing: -0.7px;
-    color: #F0F0F0;
-    padding: 5px 5px 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .history-label {
-    color: #888888;
+    color: var(--text-dim);
     font-size: 12px;
-    padding: 22px 8px 10px;
+    font-weight: 500;
+    padding: 18px 12px 6px;
 }
 
-/* TOP BAR */
-
-.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 48px;
-    border-bottom: 1px solid #383838;
-    margin-bottom: 15px;
-}
-
-.topbar-title {
-    font-size: 18px;
-    font-weight: 650;
-    color: #F0F0F0;
-}
-
-/* WELCOME SCREEN */
+/* ---------- WELCOME ---------- */
 
 .welcome {
-    width: 100%;
-    max-width: 650px;
-    min-height: 48vh;
-    margin: 0 auto;
+    min-height: 38vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 25px 12px;
+    padding: 4vh 8px 2vh;
 }
 
 .welcome h1 {
-    font-size: clamp(24px, 5vw, 32px);
-    line-height: 1.25;
+    font-size: clamp(26px, 5vw, 34px);
     font-weight: 600;
-    letter-spacing: -1px;
-    color: #ECECEC;
-    margin: 0 0 12px;
+    letter-spacing: -0.8px;
+    line-height: 1.2;
+    color: var(--text);
+    margin: 0 0 10px;
+    padding: 0;
 }
 
 .welcome p {
-    color: #A0A0A0;
-    font-size: 14px;
-    line-height: 1.6;
+    color: var(--text-dim);
+    font-size: 15px;
     margin: 0;
-    overflow-wrap: anywhere;
 }
 
-/* SUGGESTION BUTTONS */
-
-div.st-key-suggestion1 button,
-div.st-key-suggestion2 button {
+[class*="st-key-suggest_"] button {
     background: transparent !important;
-    color: #D0D0D0 !important;
-    border: 1px solid #454545 !important;
-    border-radius: 18px !important;
-    min-height: 43px;
-    font-size: 12px;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 16px !important;
+    min-height: 54px;
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+    font-weight: 400 !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    transition: background 0.15s ease;
 }
 
-div.st-key-suggestion1 button:hover,
-div.st-key-suggestion2 button:hover {
-    background: #303030 !important;
-    border-color: #777777 !important;
+[class*="st-key-suggest_"] button:hover {
+    background: var(--bg-hover) !important;
+    border-color: #555 !important;
 }
 
-/* USER MESSAGE */
+/* ---------- MESSAGES ---------- */
 
 .user-row {
-    width: 100%;
     display: flex;
     justify-content: flex-end;
-    margin: 20px 0 22px;
+    margin: 18px 0;
 }
 
 .user-bubble {
-    max-width: 85%;
-    background: #303030;
-    color: #ECECEC;
-    border-radius: 20px;
-    padding: 11px 17px;
-    font-size: 15px;
-    line-height: 1.65;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-}
-
-/* BOT IDENTITY */
-
-.assistant-label {
-    color: #AAAAAA;
-    font-size: 13px;
-    font-weight: 650;
-    letter-spacing: 0.2px;
-    margin-top: 20px;
-    margin-bottom: 5px;
-}
-
-/* BOT RESPONSE */
-
-.assistant-content {
-    width: 100%;
-    color: #ECECEC;
+    max-width: 80%;
+    background: var(--bg-user);
+    color: var(--text);
+    border-radius: 22px;
+    padding: 10px 18px;
     font-size: 15.5px;
-    line-height: 1.8;
+    line-height: 1.6;
     overflow-wrap: anywhere;
-    word-break: break-word;
 }
 
-.assistant-content p {
-    margin-bottom: 10px;
+[class*="st-key-assistant_"] {
+    position: relative;
+    padding-left: 42px;
+    margin: 10px 0 18px;
 }
 
-.assistant-content h1,
-.assistant-content h2,
-.assistant-content h3 {
-    color: #F0F0F0;
+[class*="st-key-assistant_"]::before {
+    content: "G";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #171717;
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.assistant-content pre {
-    background: #151515;
-    border: 1px solid #404040;
+[class*="st-key-assistant_"] [data-testid="stMarkdownContainer"] {
+    color: var(--text);
+    font-size: 15.5px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+}
+
+[class*="st-key-assistant_"] p {
+    margin: 0 0 12px;
+}
+
+[class*="st-key-assistant_"] h1,
+[class*="st-key-assistant_"] h2,
+[class*="st-key-assistant_"] h3 {
+    color: #FFFFFF;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin: 20px 0 8px;
+    padding: 0;
+}
+
+[class*="st-key-assistant_"] h1 { font-size: 22px; }
+[class*="st-key-assistant_"] h2 { font-size: 19px; }
+[class*="st-key-assistant_"] h3 { font-size: 16.5px; }
+
+[class*="st-key-assistant_"] li {
+    margin-bottom: 4px;
+}
+
+[class*="st-key-assistant_"] a {
+    color: #9CC9FF;
+}
+
+[class*="st-key-assistant_"] pre {
+    background: #171717 !important;
+    border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 14px;
-    overflow-x: auto;
+    padding: 14px 16px;
 }
 
-.assistant-content code {
-    background: #353535;
-    border-radius: 4px;
-    padding: 2px 5px;
+[class*="st-key-assistant_"] code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+    font-size: 13.5px;
+    background: #303030;
+    border-radius: 6px;
+    padding: 2px 6px;
 }
 
-.assistant-content pre code {
+[class*="st-key-assistant_"] pre code {
     background: transparent;
     padding: 0;
 }
 
-/* CHAT INPUT */
+[class*="st-key-assistant_"] table {
+    border-collapse: collapse;
+}
+
+[class*="st-key-assistant_"] th,
+[class*="st-key-assistant_"] td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+}
+
+/* ---------- THINKING DOTS ---------- */
+
+.thinking {
+    display: flex;
+    gap: 5px;
+    padding: 12px 0;
+}
+
+.thinking span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    animation: pulse 1.2s infinite ease-in-out;
+}
+
+.thinking span:nth-child(2) { animation-delay: 0.15s; }
+.thinking span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes pulse {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thinking span { animation: none; opacity: 0.6; }
+}
+
+/* ---------- CHAT INPUT ---------- */
+
+[data-testid="stBottom"],
+[data-testid="stBottom"] > div {
+    background: var(--bg) !important;
+}
 
 [data-testid="stChatInput"] {
-    background: #303030 !important;
-    border: 1px solid #454545 !important;
-    border-radius: 26px !important;
+    background: var(--bg-input) !important;
+    border: 1px solid transparent !important;
+    border-radius: 28px !important;
     box-shadow: none !important;
 }
 
 [data-testid="stChatInput"]:focus-within {
-    border-color: #777777 !important;
+    border-color: #555 !important;
+}
+
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] textarea {
+    background: transparent !important;
 }
 
 [data-testid="stChatInput"] textarea {
     color: #FFFFFF !important;
-    font-size: 15px !important;
+    font-size: 15.5px !important;
+    padding: 14px 8px !important;
 }
 
 [data-testid="stChatInput"] textarea::placeholder {
-    color: #999999 !important;
+    color: var(--text-dim) !important;
 }
 
 [data-testid="stChatInput"] button {
-    background: #F0F0F0 !important;
+    background: #FFFFFF !important;
     color: #171717 !important;
     border-radius: 50% !important;
 }
 
-/* THINKING INDICATOR */
-
-.stSpinner > div {
-    border-top-color: #FFFFFF !important;
+[data-testid="stChatInput"] button:disabled {
+    background: #5A5A5A !important;
+    color: #2F2F2F !important;
 }
-
-/* DISCLAIMER */
 
 .disclaimer {
-    color: #858585;
+    color: #7D7D7D;
     text-align: center;
-    font-size: 11px;
-    padding: 15px 0;
+    font-size: 12px;
+    padding: 18px 0 0;
 }
 
-/* MOBILE RESPONSIVENESS */
+/* ---------- MOBILE ---------- */
 
 @media (max-width: 768px) {
-
-    .block-container {
-        padding: 0.7rem 1rem 6rem;
-    }
-
-    .welcome {
-        min-height: 43vh;
-        padding: 20px 5px;
-    }
-
-    .welcome h1 {
-        font-size: 25px;
-    }
-
-    .welcome p {
-        font-size: 13px;
-    }
-
-    .user-bubble {
-        max-width: 90%;
-        font-size: 14px;
-    }
-
-    .assistant-content {
-        font-size: 15px;
-    }
-
+    .block-container { padding: 1rem 0.9rem 8rem; }
+    .user-bubble { max-width: 90%; font-size: 15px; }
+    [class*="st-key-assistant_"] { padding-left: 38px; }
+    [class*="st-key-assistant_"] [data-testid="stMarkdownContainer"] { font-size: 15px; }
 }
-
 </style>
 """, unsafe_allow_html=True)
 
 
 # =====================================================
-# 4. SIDEBAR AND CHAT HISTORY
+# 4. HELPERS
+# =====================================================
+
+THINKING_HTML = '<div class="thinking"><span></span><span></span><span></span></div>'
+
+
+def render_user(text):
+    safe = html.escape(text).replace("\n", "<br>")
+    st.markdown(
+        f'<div class="user-row"><div class="user-bubble">{safe}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def chunk_to_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "") if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    return str(content or "")
+
+
+def build_conversation(messages):
+    conversation = [SystemMessage(content=SYSTEM_PROMPT)]
+    for msg in messages:
+        if msg["role"] == "user":
+            conversation.append(HumanMessage(content=msg["content"]))
+        else:
+            conversation.append(AIMessage(content=msg["content"]))
+    return conversation
+
+
+# =====================================================
+# 5. SIDEBAR
 # =====================================================
 
 with st.sidebar:
-
     st.markdown(
-        '<div class="brand">GhimireyGPT</div>',
-        unsafe_allow_html=True
+        '<div class="brand"><span class="brand-mark">G</span>GhimireyGPT</div>',
+        unsafe_allow_html=True,
     )
 
-    if st.button("+  New chat", use_container_width=True):
-
-        st.session_state.chat_counter += 1
-
-        name = f"New chat {st.session_state.chat_counter}"
-
-        st.session_state.chats[name] = []
-        st.session_state.current_chat = name
-
+    if st.button("+  New chat", key="new_chat", use_container_width=True):
+        new_chat()
         st.rerun()
 
-    st.markdown(
-        '<div class="history-label">Your chats</div>',
-        unsafe_allow_html=True
-    )
+    st.markdown('<div class="history-label">Your chats</div>', unsafe_allow_html=True)
 
-    for name in reversed(list(st.session_state.chats.keys())):
+    for chat_id in reversed(list(st.session_state.chats.keys())):
+        chat = st.session_state.chats[chat_id]
 
-        if st.button(
-            name,
-            key="history_" + name,
-            use_container_width=True
-        ):
+        if chat_id == st.session_state.current_chat:
+            st.markdown(
+                f"<style>.st-key-chat_{chat_id} button "
+                "{ background: #2A2A2A !important; }</style>",
+                unsafe_allow_html=True,
+            )
 
-            st.session_state.current_chat = name
+        if st.button(chat["title"], key=f"chat_{chat_id}", use_container_width=True):
+            st.session_state.current_chat = chat_id
             st.rerun()
-
-
-# =====================================================
-# 5. TOP BAR
-# =====================================================
-
-st.markdown("""
-<div class="topbar">
-    <div class="topbar-title">GhimireyGPT</div>
-</div>
-""", unsafe_allow_html=True)
 
 
 # =====================================================
 # 6. CURRENT CONVERSATION
 # =====================================================
 
-messages = st.session_state.chats[
-    st.session_state.current_chat
-]
+chat = st.session_state.chats[st.session_state.current_chat]
+messages = chat["messages"]
 
-
-# =====================================================
-# 7. WELCOME SCREEN
-# =====================================================
-
+# Welcome screen
 if not messages:
-
-    st.markdown("""
-    <div class="welcome">
-        <h1>What can I help with?</h1>
-        <p>Ask anything. Let's figure it out together.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        if st.button(
-            "Explain something interesting",
-            key="suggestion1",
-            use_container_width=True
-        ):
-
-            st.session_state.suggested_prompt = (
-                "Explain something interesting to me."
-            )
-
-            st.rerun()
-
-    with col2:
-
-        if st.button(
-            "Help me write something",
-            key="suggestion2",
-            use_container_width=True
-        ):
-
-            st.session_state.suggested_prompt = (
-                "Help me write something."
-            )
-
-            st.rerun()
-
-
-# =====================================================
-# 8. DISPLAY CHAT MESSAGES
-# =====================================================
-
-for message in messages:
-
-    if message["role"] == "user":
-
-        safe_text = html.escape(
-            message["content"]
-        ).replace("\n", "<br>")
-
-        st.markdown(
-            f"""
-            <div class="user-row">
-                <div class="user-bubble">{safe_text}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    else:
-
-        st.markdown(
-            '<div class="assistant-label">GhimireyGPT</div>',
-            unsafe_allow_html=True
-        )
-
-        st.markdown(
-            '<div class="assistant-content">',
-            unsafe_allow_html=True
-        )
-
-        st.markdown(message["content"])
-
-        st.markdown(
-            '</div>',
-            unsafe_allow_html=True
-        )
-
-
-# =====================================================
-# 9. DISCLAIMER - ONLY AFTER FIRST MESSAGE
-# =====================================================
-
-if messages:
-
     st.markdown(
-        '<div class="disclaimer">'
-        'GhimireyGPT can make mistakes. '
-        'Check important information.'
-        '</div>',
-        unsafe_allow_html=True
+        """
+        <div class="welcome">
+            <h1>What can I help with?</h1>
+            <p>Ask anything. Let's figure it out together.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
+    cols = st.columns(2)
+    for i, (label, prompt_text) in enumerate(SUGGESTIONS):
+        with cols[i % 2]:
+            if st.button(label, key=f"suggest_{i}", use_container_width=True):
+                st.session_state.suggested_prompt = prompt_text
+                st.rerun()
 
-# =====================================================
-# 10. MESSAGE INPUT
-# =====================================================
-
-if st.session_state.suggested_prompt:
-
-    prompt = st.session_state.suggested_prompt
-
-    st.session_state.suggested_prompt = None
-
-else:
-
-    prompt = st.chat_input(
-        "How's your day going?"
-    )
+# Past messages
+for i, msg in enumerate(messages):
+    if msg["role"] == "user":
+        render_user(msg["content"])
+    else:
+        with st.container(key=f"assistant_{st.session_state.current_chat}_{i}"):
+            st.markdown(msg["content"])
 
 
 # =====================================================
-# 11. PROCESS USER MESSAGE
+# 7. INPUT
+# =====================================================
+
+typed = st.chat_input("Message GhimireyGPT")
+
+prompt = st.session_state.suggested_prompt or typed
+st.session_state.suggested_prompt = None
+
+
+# =====================================================
+# 8. HANDLE NEW MESSAGE (STREAMING)
 # =====================================================
 
 if prompt:
-
-    messages = st.session_state.chats[
-        st.session_state.current_chat
-    ]
-
-    messages.append({
-        "role": "user",
-        "content": prompt
-    })
-
-    # Rename first conversation
+    messages.append({"role": "user", "content": prompt})
+    render_user(prompt)
 
     if len(messages) == 1:
-
-        old_name = st.session_state.current_chat
-
-        new_name = prompt.strip()[:32] or "New conversation"
-
-        if new_name in st.session_state.chats:
-
-            st.session_state.chat_counter += 1
-
-            new_name = (
-                new_name + " " +
-                str(st.session_state.chat_counter)
-            )
-
-        st.session_state.chats[new_name] = messages
-
-        del st.session_state.chats[old_name]
-
-        st.session_state.current_chat = new_name
-
-    # Check API key
+        title = prompt.strip().replace("\n", " ")
+        chat["title"] = (title[:34] + "…") if len(title) > 34 else title
 
     if not API_KEY:
-
-        st.error(
-            "API key missing. Check your Streamlit Secrets."
-        )
-
+        st.error("API key missing. Add OPENROUTER_API_KEY to your Streamlit secrets or .env file.")
     else:
+        answer = ""
+        with st.container(key=f"assistant_{st.session_state.current_chat}_{len(messages)}"):
+            placeholder = st.empty()
+            placeholder.markdown(THINKING_HTML, unsafe_allow_html=True)
 
-        try:
-
-            llm = ChatOpenAI(
-                model=MODEL,
-                api_key=API_KEY,
-                base_url="https://openrouter.ai/api/v1",
-                temperature=0.7,
-                timeout=120
-            )
-
-            # GhimireyGPT identity and behaviour
-
-            conversation = [
-                SystemMessage(
-                    content="""
-                    Your name is GhimireyGPT.
-
-                    You are GhimireyGPT, the AI assistant
-                    powering the GhimireyGPT project.
-
-                    IDENTITY RULES:
-
-                    - Your name is ALWAYS GhimireyGPT.
-                    - Never introduce yourself as ERNIE Bot.
-                    - Never introduce yourself as Wenxin Yiyan.
-                    - Never claim to be ChatGPT, Gemini, Claude,
-                      or another AI assistant.
-                    - Never confuse your underlying model
-                      with your assistant identity.
-                    - If asked your name, answer:
-                      "I'm GhimireyGPT. What can I help you with?"
-
-                    You may discuss other AI systems when asked,
-                    but your own identity remains GhimireyGPT.
-
-                    PERSONALITY:
-
-                    - Be natural, intelligent and conversational.
-                    - Be friendly without excessive flattery.
-                    - Be direct and honest.
-                    - Disagree when the facts support disagreement.
-                    - Avoid robotic introductions.
-                    - Avoid unnecessary filler.
-                    - Use headings only when useful.
-                    - Adapt to the user's communication style.
-                    - Explain difficult things simply.
-                    - Give detailed answers when necessary.
-                    """
-                )
-            ]
-
-            # Add conversation history
-
-            for msg in messages:
-
-                if msg["role"] == "user":
-
-                    conversation.append(
-                        HumanMessage(
-                            content=msg["content"]
-                        )
-                    )
-
-                else:
-
-                    conversation.append(
-                        AIMessage(
-                            content=msg["content"]
-                        )
-                    )
-
-            # Generate response
-
-            with st.spinner("Thinking..."):
-
-                response = llm.invoke(conversation)
-
-            answer = response.content
-
-            if isinstance(answer, list):
-
-                answer = "\n".join(
-                    str(item.get("text", item))
-                    if isinstance(item, dict)
-                    else str(item)
-                    for item in answer
+            try:
+                llm = ChatOpenAI(
+                    model=MODEL,
+                    api_key=API_KEY,
+                    base_url=BASE_URL,
+                    temperature=0.7,
+                    timeout=120,
+                    streaming=True,
                 )
 
-            messages.append({
-                "role": "assistant",
-                "content": str(answer)
-            })
+                for chunk in llm.stream(build_conversation(messages)):
+                    answer += chunk_to_text(chunk.content)
+                    if answer:
+                        placeholder.markdown(answer + " ▌")
 
-        except Exception as error:
+                if not answer.strip():
+                    answer = "I didn't get a response. Please try again."
 
-            messages.append({
-                "role": "assistant",
-                "content": (
-                    "I couldn't complete that request. "
-                    "Please try again. "
-                    f"\n\nError: {error}"
+                placeholder.markdown(answer)
+
+            except Exception as error:
+                answer = (
+                    "I couldn't complete that request. Please try again.\n\n"
+                    f"`{error}`"
                 )
-            })
+                placeholder.markdown(answer)
 
-    st.rerun()
+        messages.append({"role": "assistant", "content": answer})
+        st.rerun()
 
 
 # =====================================================
-# 12. AUTOMATIC SCROLL TO LATEST MESSAGE
+# 9. DISCLAIMER + AUTO SCROLL
 # =====================================================
+
+if messages:
+    st.markdown(
+        '<div class="disclaimer">GhimireyGPT can make mistakes. Check important information.</div>',
+        unsafe_allow_html=True,
+    )
 
 components.html("""
 <script>
-
 function scrollToLatest() {
-
-    const parent = window.parent.document;
-
-    const container = parent.querySelector(
-        '[data-testid="stAppViewContainer"]'
-    );
-
-    if (container) {
-
-        container.scrollTo({
-            top: container.scrollHeight,
-            behavior: "smooth"
-        });
-
-    }
-
+    const doc = window.parent.document;
+    const el = doc.querySelector('[data-testid="stMain"]')
+            || doc.querySelector('[data-testid="stAppViewContainer"]');
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 }
-
-setTimeout(scrollToLatest, 300);
-setTimeout(scrollToLatest, 800);
-
+setTimeout(scrollToLatest, 200);
+setTimeout(scrollToLatest, 700);
 </script>
 """, height=0)
-
-
